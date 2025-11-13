@@ -21,9 +21,9 @@ CRITICAL_CAPACITY_THRESHOLD = 20  # Critical capacity threshold for shutdown (%)
 
 # Charging control variables
 MAX_CHARGE_VOLTAGE = 4.10  # Maximum charging voltage (V)
-CHARGE_RESUME_VOLTAGE = 3.95  # Resume charging below this voltage (V)
-CHARGE_CONTROL_PIN = 16  # GPIO pin to control charging (per Suptronics X120X manual)
-CHARGE_ENABLE_STATE = 0  # GPIO state to enable charging 1 = disable (high), 0 = enable (low)
+CHARGE_PAUSE_TIME = 600    # Time in seconds to pause charging after reaching max voltage (user variable)
+CHARGE_CONTROL_PIN = 16    # GPIO pin to control charging (per Suptronics X120X manual)
+CHARGE_ENABLE_STATE = 0    # GPIO state to enable charging 1 = disable (high), 0 = enable (low)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -185,7 +185,7 @@ def display_system_stats(voltage, capacity, charging_enabled, ac_power_state):
     print(f"             Fan RPM: {RED_BOLD}{fan_rpm}{RESET}")
     print(f"        {ORANGE}=-=-=-=-=-= Charging Control =-=-=-=-=-{RESET}")
     print(f"             Max Charge Voltage: {RED_BOLD}{MAX_CHARGE_VOLTAGE}V{RESET}")
-    print(f"             Resume Charge Voltage: {RED_BOLD}{CHARGE_RESUME_VOLTAGE}V{RESET}")
+    print(f"             Charge Pause Time: {RED_BOLD}{CHARGE_PAUSE_TIME}s{RESET}")
     print(f"             Current Charging State: {RED_BOLD}{charge_status}{RESET}")
     print(f"        {ORANGE}=-=-=-= ⚡ Power Status ⚡ =-=-=-=-{RESET}")
     print(f"                 {power_status}")
@@ -202,29 +202,32 @@ def display_system_stats(voltage, capacity, charging_enabled, ac_power_state):
     
     print("="*50 + "\n")
 
-def control_charging(charge_line, voltage, current_charge_state):
-    """Control charging based on voltage thresholds"""
+def control_charging(charge_line, voltage, current_charge_state, last_charge_stop_time):
+    """
+    Enable charging if voltage is below MAX_CHARGE_VOLTAGE and pause time has passed.
+    Disable charging if voltage reaches/exceeds MAX_CHARGE_VOLTAGE.
+    """
     if voltage is None:
         logger.warning("Cannot control charging - voltage reading failed")
-        return current_charge_state
-    
+        return current_charge_state, last_charge_stop_time
+
     try:
+        # Stop charging if voltage is at or above max
         if voltage >= MAX_CHARGE_VOLTAGE and current_charge_state:
-            # Stop charging if voltage too high
-            charge_line.set_value(1 - CHARGE_ENABLE_STATE)  # Disable charging
+            charge_line.set_value(1 - CHARGE_ENABLE_STATE)
             logger.info(f"CHARGING STOPPED - Voltage {voltage:.3f}V >= {MAX_CHARGE_VOLTAGE}V")
-            return False
-        elif voltage <= CHARGE_RESUME_VOLTAGE and not current_charge_state:
-            # Resume charging if voltage dropped sufficiently
-            charge_line.set_value(CHARGE_ENABLE_STATE)  # Enable charging
-            logger.info(f"CHARGING RESUMED - Voltage {voltage:.3f}V <= {CHARGE_RESUME_VOLTAGE}V")
-            return True
-        else:
-            # No change needed
-            return current_charge_state
+            last_charge_stop_time = time.time()
+            return False, last_charge_stop_time
+        # Resume charging only after pause time has passed
+        elif voltage < MAX_CHARGE_VOLTAGE and not current_charge_state:
+            if last_charge_stop_time is None or (time.time() - last_charge_stop_time) >= CHARGE_PAUSE_TIME:
+                charge_line.set_value(CHARGE_ENABLE_STATE)
+                logger.info(f"CHARGING RESUMED - Voltage {voltage:.3f}V < {MAX_CHARGE_VOLTAGE}V")
+                return True, last_charge_stop_time
+        return current_charge_state, last_charge_stop_time
     except Exception as e:
         logger.error(f"Error controlling charging: {e}")
-        return current_charge_state
+        return current_charge_state, last_charge_stop_time
 
 def check_critical_conditions(ac_power_state, voltage, capacity):
     """
@@ -271,6 +274,7 @@ bus = None
 chip = None
 pld_line = None
 charge_line = None
+last_charge_stop_time = None
 
 try:
     # Initialize I2C bus
@@ -315,7 +319,9 @@ try:
             
             # Control charging if charge control is available
             if charge_line is not None:
-                charging_enabled = control_charging(charge_line, voltage, charging_enabled)
+                charging_enabled, last_charge_stop_time = control_charging(
+                    charge_line, voltage, charging_enabled, last_charge_stop_time
+                )
             
             # Display comprehensive system statistics
             display_system_stats(voltage, capacity, charging_enabled, ac_power_state)

@@ -19,9 +19,9 @@ CRITICAL_CAPACITY_THRESHOLD = 20  # Critical capacity threshold for shutdown (%)
 
 # Charging control variables
 MAX_CHARGE_VOLTAGE = 4.10  # Maximum charging voltage (V)
-CHARGE_RESUME_VOLTAGE = 3.89  # Resume charging below this voltage (V)
-CHARGE_CONTROL_PIN = 16  # GPIO pin to control charging (per Suptronics X120X manual)
-CHARGE_ENABLE_STATE = 0  # GPIO state to enable charging 1 = disable (high), 0 = enable (low)
+CHARGE_PAUSE_TIME = 600    # Time in seconds to pause charging after reaching max voltage
+CHARGE_CONTROL_PIN = 16    # GPIO pin to control charging (per Suptronics X120X manual)
+CHARGE_ENABLE_STATE = 0    # GPIO state to enable charging 1 = disable (high), 0 = enable (low)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,9 +31,8 @@ def readVoltage(bus, address):
     """Read battery voltage from MAX17040/MAX17041"""
     try:
         read = bus.read_word_data(address, 2)  # VCELL register
-        swapped = struct.unpack("<H", struct.pack(">H", read))[0]  # big endian to little endian
-        voltage = swapped * 1.25 / 1000 / 16  # convert to voltage (MAX17040: 1.25mV resolution)
-        #logger.debug(f"Raw voltage data: {read}, Swapped: {swapped}, Calculated Voltage: {voltage}")
+        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
+        voltage = swapped * 1.25 / 1000 / 16
         return voltage
     except Exception as e:
         logger.error(f"Error reading voltage: {e}")
@@ -43,15 +42,14 @@ def readCapacity(bus, address):
     """Read battery capacity from MAX17040/MAX17041"""
     try:
         read = bus.read_word_data(address, 4)  # SOC register
-        swapped = struct.unpack("<H", struct.pack(">H", read))[0]  # big endian to little endian
-        capacity = swapped / 256  # convert to 1-100% scale
+        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
+        capacity = swapped / 256
         return capacity
     except Exception as e:
         logger.error(f"Error reading capacity: {e}")
         return None
 
 def get_battery_status(voltage):
-    """Determine battery status based on voltage"""
     if voltage is None:
         return "Unknown"
     elif 3.87 <= voltage <= 4.2:
@@ -68,7 +66,6 @@ def get_battery_status(voltage):
         return "Unknown"
 
 def read_hardware_metric(command_args, strip_chars):
-    """Read hardware metrics using vcgencmd"""
     try:
         output = check_output(command_args).decode("utf-8")
         metric_str = output.split("=")[1].strip().rstrip(strip_chars)
@@ -151,30 +148,30 @@ def log_system_stats(voltage, capacity, charging_enabled, ac_power_state):
         elif capacity <= 15:
             logger.critical(f"UPS Power failure imminent - Batteries @ {capacity:.2f}%")
 
-def control_charging(charge_line, voltage, current_charge_state):
-    hysteresis = 0.05  # Voltage buffer to prevent frequent toggling
+def control_charging(charge_line, voltage, current_charge_state, last_charge_stop_time):
+    """
+    Limit charging at MAX_CHARGE_VOLTAGE and stop charging for CHARGE_PAUSE_TIME seconds.
+    """
     if voltage is None:
         logger.warning("Cannot control charging - voltage reading failed")
-        return current_charge_state
+        return current_charge_state, last_charge_stop_time
     try:
+        # Stop charging if voltage is at or above max
         if voltage >= MAX_CHARGE_VOLTAGE and current_charge_state:
-            charge_line.set_value(1 - CHARGE_ENABLE_STATE)  # Disable charging
+            charge_line.set_value(1 - CHARGE_ENABLE_STATE)
             logger.info(f"CHARGING STOPPED - Voltage {voltage:.3f}V >= {MAX_CHARGE_VOLTAGE}V")
-            return False
-        elif voltage <= (CHARGE_RESUME_VOLTAGE - hysteresis) and not current_charge_state:
-            charge_line.set_value(CHARGE_ENABLE_STATE)  # Enable charging
-            logger.info(f"CHARGING RESUMED - Voltage {voltage:.3f}V <= {CHARGE_RESUME_VOLTAGE - hysteresis}V")
-            return True
-        elif current_charge_state and voltage < MAX_CHARGE_VOLTAGE:
-            # Ensure charging continues until MAX_CHARGE_VOLTAGE is reached
-            logger.info(f"CHARGING CONTINUING - Voltage {voltage:.3f}V < {MAX_CHARGE_VOLTAGE}V")
-            return True
-        else:
-            #logger.debug(f"No change in charging state. Voltage: {voltage:.3f}V, Current State: {current_charge_state}")
-            return current_charge_state
+            last_charge_stop_time = time.time()
+            return False, last_charge_stop_time
+        # Resume charging only after pause time has passed
+        elif voltage < MAX_CHARGE_VOLTAGE and not current_charge_state:
+            if last_charge_stop_time is None or (time.time() - last_charge_stop_time) >= CHARGE_PAUSE_TIME:
+                charge_line.set_value(CHARGE_ENABLE_STATE)
+                logger.info(f"CHARGING RESUMED - Voltage {voltage:.3f}V < {MAX_CHARGE_VOLTAGE}V")
+                return True, last_charge_stop_time
+        return current_charge_state, last_charge_stop_time
     except Exception as e:
         logger.error(f"Error controlling charging: {e}")
-        return current_charge_state
+        return current_charge_state, last_charge_stop_time
 
 def check_critical_conditions(ac_power_state, voltage, capacity):
     critical_conditions = []
@@ -189,7 +186,7 @@ def check_critical_conditions(ac_power_state, voltage, capacity):
 
 def quick_start_fuel_gauge(bus, address):
     try:
-        bus.write_word_data(address, 6, 0x4000)  # MODE register quick-start command
+        bus.write_word_data(address, 6, 0x4000)
         time.sleep(1)
     except Exception as e:
         logger.error(f"Error performing quick-start: {e}")
@@ -200,6 +197,7 @@ bus = None
 chip = None
 pld_line = None
 charge_line = None
+last_charge_stop_time = None
 
 try:
     bus = smbus2.SMBus(1)
@@ -237,7 +235,9 @@ try:
             battery_status = get_battery_status(voltage)
 
             if charge_line is not None:
-                charging_enabled = control_charging(charge_line, voltage, charging_enabled)
+                charging_enabled, last_charge_stop_time = control_charging(
+                    charge_line, voltage, charging_enabled, last_charge_stop_time
+                )
 
             log_system_stats(voltage, capacity, charging_enabled, ac_power_state)
 

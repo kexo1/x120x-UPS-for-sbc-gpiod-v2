@@ -26,13 +26,11 @@ sudo i2cdetect -y 1
 ### 2. Download and Setup Script
 
 ```bash
-# Download the script
-wget https://github.com/Schnema1/x120x-UPS-for-sbc/blob/main/BTCupsSystemd.py
-# or
-wget 
-https://github.com/Schnema1/x120x-UPS-for-sbc/blob/main/BTCups.py
+# Download the scripts
+wget https://raw.githubusercontent.com/Schnema1/x120x-UPS-for-sbc/main/BTCups.py
+wget https://raw.githubusercontent.com/Schnema1/x120x-UPS-for-sbc/main/BTCupsSystemd.py
 
-# Make script executable
+# Make scripts executable (optional)
 chmod +x BTCups.py BTCupsSystemd.py
 
 # Test run BTCups.py (recommended for manual or initial setup)
@@ -50,45 +48,50 @@ For production use, run BTCupsSystemd.py as a systemd service. See below for ser
 Modify these variables in `BTCups.py` or `BTCupsSystemd.py` based on your requirements:
 
 #### Conservative Settings (Safer, Earlier Shutdown)
+
 ```python
 SHUTDOWN_THRESHOLD = 2     # Fewer failures needed (faster response)
 SLEEP_TIME = 30            # Check more frequently
-CRITICAL_CAPACITY = 25     # Shutdown at 25% instead of 20%
-CRITICAL_VOLTAGE = 3.30    # Shutdown at 3.30V instead of 3.20V
+CRITICAL_CAPACITY_THRESHOLD = 25     # Shutdown at 25% instead of 20%
+CRITICAL_VOLTAGE_THRESHOLD = 3.30    # Shutdown at 3.30V instead of 3.20V
 ```
 
 #### Moderate Settings (Balanced - Default)
+
 ```python
 SHUTDOWN_THRESHOLD = 3     # Default setting
 SLEEP_TIME = 60            # Default setting
-CRITICAL_CAPACITY = 20     # Default setting  
-CRITICAL_VOLTAGE = 3.20    # Default setting
+CRITICAL_CAPACITY_THRESHOLD = 20     # Default setting
+CRITICAL_VOLTAGE_THRESHOLD = 3.20    # Default setting
 ```
 
 #### Aggressive Settings (Maximum Runtime, Higher Risk)
+
 ```python
 SHUTDOWN_THRESHOLD = 5     # More failures needed (slower response)
 SLEEP_TIME = 90            # Check less frequently
-CRITICAL_CAPACITY = 15     # Run battery lower
-CRITICAL_VOLTAGE = 3.10    # Run voltage lower (risky for Li-ion)
+CRITICAL_CAPACITY_THRESHOLD = 15     # Run battery lower
+CRITICAL_VOLTAGE_THRESHOLD = 3.10    # Run voltage lower (risky for Li-ion)
 ```
 
 ### Charging Control Settings
 
 ```python
 MAX_CHARGE_VOLTAGE = 4.10   # Maximum charging voltage (V)
-CHARGE_RESUME_VOLTAGE = 3.9 # Resume charging below this voltage (V)
+CHARGE_PAUSE_TIME = 600     # Pause charging for this many seconds after reaching max voltage
 CHARGE_CONTROL_PIN = 16     # GPIO pin to control charging
 CHARGE_ENABLE_STATE = 0     # GPIO state to enable charging (0 = low/enable, 1 = high/disable)
 ```
 
 **Important**: According to the Suptronics manual:
+
 - `sudo pinctrl set 16 op dl` (drive low) **enables** charging
 - `sudo pinctrl set 16 op dh` (drive high) **disables** charging
 
 ## Running as a Service
 
 ### 1. Create Service File
+
 **Change path** and user according to your needs. **Use BTCupsSystemd.py for systemd!**
 
 ```bash
@@ -143,3 +146,9 @@ sudo systemctl restart btcups.service
 # Disable service from starting on boot
 sudo systemctl disable btcups.service
 ```
+
+## Notes
+
+- The charging logic in both scripts will **limit charging at 4.10V** and pause charging for a configurable time (`CHARGE_PAUSE_TIME`, default 600s) before resuming.
+- For manual operation, use `BTCups.py`. For continuous/systemd operation, use `BTCupsSystemd.py`.
+- Status and warnings are printed to the console (manual) or logged to the system journal (systemd).
