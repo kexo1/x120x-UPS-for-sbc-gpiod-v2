@@ -15,15 +15,10 @@ Tested with Rpi5 only. If your SBC matches the Rpi5 pin layout, it should work a
 
 Intended for use with Bitcoin Fullnode projects like [raspiblitz](https://github.com/raspiblitz/raspiblitz), [raspibolt](https://github.com/raspibolt/raspibolt/) or similar. With lightning enabled, you don't want to risk a power loss and get a corrupted database. This script allows you to run some hours without power and, if the batteries are close to empty, perform a graceful shutdown.
 
-**Open Points**
-Once the desired voltage is reached, the script stops charging. However, as long the charger is plugged in, there is still kind of charge happening.
-
-**This fork is enhanced by AI.**
-
 ## Features
 
 - **Battery Monitoring**: Real-time voltage and capacity monitoring using MAX17040/MAX17041 fuel gauge
-- **Smart Charging Control**: Prevents overcharging with configurable voltage thresholds
+- **Smart Charging Control**: Charging is enabled when battery voltage is below 4.10V and the pause time has passed; charging is disabled when battery voltage reaches or exceeds 4.10V, and remains off for a configurable pause time (`CHARGE_PAUSE_TIME`) before resuming.
 - **Power Loss Detection**: Monitors AC power status via GPIO
 - **Safe Shutdown**: Automatic shutdown on critical battery conditions
 - **Logging**: Comprehensive logging with configurable levels
@@ -31,7 +26,7 @@ Once the desired voltage is reached, the script stops charging. However, as long
 
 ## Hardware Requirements
 
-- Raspberry Pi 5 (or GIPO compatible boards )
+- Raspberry Pi 5 (or GPIO compatible boards)
 - Geekworm X1200 series UPS board (X1200, X1201, X1202)
 - I2C enabled on Raspberry Pi
 
@@ -39,17 +34,27 @@ Once the desired voltage is reached, the script stops charging. However, as long
 
 - **Multiple Failure Threshold**: Requires consecutive failures before shutdown
 - **Graceful Cleanup**: Properly releases GPIO resources
-- **Charging Protection**: Prevents overcharging with voltage monitoring
+- **Charging Protection**: Prevents overcharging with voltage monitoring and timed charging pause
 - **Comprehensive Logging**: All events logged with timestamps
 - **Error Handling**: Continues operation even with sensor read failures
 
 ## Battery Status Levels
 
 - **Full**: 3.87V - 4.2V
-- **High**: 3.7V - 3.87V  
+- **High**: 3.7V - 3.87V
 - **Medium**: 3.55V - 3.7V
 - **Low**: 3.4V - 3.55V
 - **Critical**: < 3.4V
+
+## Charging Logic
+
+- Charging is **enabled** when battery voltage is below 4.10V and the pause time has passed.
+- Charging is **disabled** when battery voltage reaches or exceeds 4.10V, and remains off for `CHARGE_PAUSE_TIME` seconds before resuming.
+
+## GPIO Pin Configuration
+
+- **GPIO 6**: Power Loss Detection (PLD) - Input
+- **GPIO 16**: Charging Control - Output
 
 ## License
 
