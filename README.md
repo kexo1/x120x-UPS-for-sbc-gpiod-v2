@@ -1,6 +1,6 @@
 # Raspberry Pi UPS Monitoring Script
 
-> **Fork notice:** This is a fork of the original [BTCups](https://github.com/TheSmallPixel/btcups) project, updated for gpiod v2 compatibility and tested on Raspberry Pi 5. Updated with AI assistance. Use at your own risk.
+> **Fork notice:** This is a fork of the original [BTCups](https://github.com/Schnema1/x120x-UPS-for-sbc) project, updated for gpiod v2 compatibility and tested on Raspberry Pi 5. Updated with AI assistance. Use at your own risk.
 
 ---
 
