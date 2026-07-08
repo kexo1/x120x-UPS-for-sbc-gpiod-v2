@@ -27,6 +27,9 @@ CHARGE_ENABLE_STATE = (
     0  # GPIO state to enable charging: 0 = enable (low), 1 = disable (high)
 )
 
+# Logging frequency control (seconds)
+LOG_INTERVAL = 600  # default 10 minutes between detailed status logs
+
 # GPIO / I2C config
 GPIO_CHIP = "/dev/gpiochip0"  # Pi 5 uses gpiochip0 with pinctrl-rp1
 PLD_PIN = 6  # Power loss detection pin
@@ -260,6 +263,7 @@ bus = None
 pld_line = None
 charge_line = None
 last_charge_stop_time = None
+last_log_time = None
 
 try:
     bus = smbus2.SMBus(I2C_BUS)
@@ -313,7 +317,16 @@ try:
                     charge_line, voltage, charging_enabled, last_charge_stop_time
                 )
 
-            log_system_stats(voltage, capacity, charging_enabled, ac_power_state)
+            # Throttle detailed logging to reduce log volume
+            try:
+                now = time.time()
+                if last_log_time is None or (now - last_log_time) >= LOG_INTERVAL:
+                    log_system_stats(
+                        voltage, capacity, charging_enabled, ac_power_state
+                    )
+                    last_log_time = now
+            except Exception as e:
+                logger.error(f"Error during throttled logging: {e}")
 
             critical_conditions = check_critical_conditions(
                 ac_power_state, voltage, capacity
